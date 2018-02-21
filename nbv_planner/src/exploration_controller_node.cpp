@@ -1,14 +1,12 @@
 #include "nbv_planner/exploration_controller_node.hpp"
 
-const std::string link_ = "camera_link";
 static const std::string PLANNING_GROUP = "eef_group";
+static const std::string NBV_SERVICE_NAME = "/get_nbv";
+
 
 Explorer::Explorer(ros::NodeHandle &nh) {
-//  moveit::planning_interface::MoveGroupInterface move_group("manipulator");
-//  move_group_ = move_group;
-  nbv_client_ = nh.serviceClient<nbv_planner::GetNBV>("/get_nbv");
+  nbv_client_ = nh.serviceClient<nbv_planner::GetNBV>(NBV_SERVICE_NAME);
   node_handle_ = nh;
-//  exploration_server_ = nh.advertiseService<std_srvs::Empty>("do_exploration", &Explorer::MoveToNBVs, this);
 
 }
 
@@ -19,10 +17,10 @@ bool Explorer::MoveToNBVs(moveit::planning_interface::MoveGroupInterface &move_g
    * - Get next best view given current information
    * - Move to view
    */
-  ros::service::waitForService("/get_nbv");
+  ros::service::waitForService(NBV_SERVICE_NAME);
   while (true)
   {
-    ROS_INFO_STREAM("====STARTING EXPLORATION CONTROLLER=====");
+
     // Make a new call to the GetNBV service to get a list of potentially-good poses to move towards.
     nbv_planner::GetNBV srv;
     nbv_client_.call(srv);
@@ -30,17 +28,19 @@ bool Explorer::MoveToNBVs(moveit::planning_interface::MoveGroupInterface &move_g
       ROS_INFO("Exploration reasonably completed");
       break;
     }
+
     geometry_msgs::PoseArray move_targets = srv.response.bestViewPose;
     // Start with the most highly ranked pose
     int currentPoseIndex = 0;
 
     // Get the position of the TSDF volume to set constraint on camera orientation.
-    tfListener_.waitForTransform("base_link", "volume_pose", ros::Time::now(), ros::Duration(0.5));
+    tfListener_.waitForTransform(move_group.getPlanningFrame(), move_targets.header.frame_id, ros::Time::now(), ros::Duration(0.5));
 
     // Test poses until we can find one that's reachable in constrained space.
     bool success = false;
     while(!success)
     {
+
       ROS_INFO_STREAM("Pose index: " << currentPoseIndex);
       if (currentPoseIndex >= move_targets.poses.size())
       {
@@ -53,13 +53,18 @@ bool Explorer::MoveToNBVs(moveit::planning_interface::MoveGroupInterface &move_g
       geometry_msgs::PoseStamped input_pose;
       input_pose.header = move_targets.header;
       input_pose.pose = move_targets.poses[currentPoseIndex];
-      ROS_INFO_STREAM("FRAME ID " << move_targets.header.frame_id);
-      tfListener_.transformPose("base_link", input_pose, target_pose);
-
-      moveit::planning_interface::MoveGroupInterface::Plan my_plan;
+      ROS_INFO_STREAM("====================");
+      ROS_INFO_STREAM("input pose frame = " << input_pose.header.frame_id);
+      ROS_INFO_STREAM("input pose = " << input_pose.pose);
+      tfListener_.transformPose(move_group.getPlanningFrame(), input_pose, target_pose);
+      ROS_INFO_STREAM("target pose frame = " << target_pose.header.frame_id);
+      ROS_INFO_STREAM("target pose = " << target_pose.pose);
+      ROS_INFO_STREAM("====================");
 
       move_group.setPoseTarget(target_pose);
       ROS_INFO_STREAM("Trying next best pose: " << target_pose);
+
+      moveit::planning_interface::MoveGroupInterface::Plan my_plan;
 
       if (move_group.plan(my_plan))
       {

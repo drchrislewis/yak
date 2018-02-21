@@ -53,6 +53,8 @@ class NBVSolver {
 
     void Update();
 
+  private:
+
     ros::ServiceServer nbv_server_;
 
     ros::ServiceClient octomap_client_;

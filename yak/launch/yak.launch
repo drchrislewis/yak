@@ -58,16 +58,16 @@
              tsdf_trunc_dist: 0.004
 
              # The size of the TSDF volume in voxels
-             volume_dims_x: 512
-             volume_dims_y: 512
-             volume_dims_z: 512
+             volume_dims_x: 2304
+             volume_dims_y: 256
+             volume_dims_z: 256
 
-             volume_resolution: 0.002
+             volume_resolution: 0.01
 
              # The position of the topmost corner of the TSDF volume in meters
-             volume_pos_x: 0.5
-             volume_pos_y: 0.5
-             volume_pos_z: -0.5
+             volume_pos_x: 1.0
+             volume_pos_y: 1.25
+             volume_pos_z: 1.2
 
          </rosparam>
      </node>

@@ -53,3 +53,6 @@ Executing rosrun nbv_planner exploration_controller_node will execute an explora
 ```
 nvidia-docker run -v "<absolute path to your yak workspace:/yak_ws>" rosindustrial/yak:kinetic catkin build --workspace /yak_ws -DCMAKE_LIBRARY_PATH=/usr/local/nvidia/lib64/
 ```
+
+# Implementations
+see github.com/AustinDeric/yak_demos for implentations on various robots with various sensors.

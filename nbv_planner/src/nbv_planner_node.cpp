@@ -1,12 +1,13 @@
 #include "nbv_planner/nbv_planner_node.hpp"
 
 
-static const std::string REF_FRAME = "volume_pose";
+static const std::string REF_FRAME = "/volume_pose";
+static const std::string OCTOMAP_SERVICE = "/octomap_full";
 
 NBVSolver::NBVSolver(ros::NodeHandle &nh)
 {
   nbv_server_ = nh.advertiseService("get_nbv", &NBVSolver::GetNBV, this);
-  octomap_client_ = nh.serviceClient<octomap_msgs::GetOctomap>("/octomap_full");
+  octomap_client_ = nh.serviceClient<octomap_msgs::GetOctomap>(OCTOMAP_SERVICE);
   unknown_cloud_publisher_ = nh.advertise<sensor_msgs::PointCloud2>("my_unknown_cloud",1);
 
   float bound_min_x, bound_min_y, bound_min_z, bound_max_x, bound_max_y, bound_max_z, voxel_res;
@@ -33,7 +34,7 @@ NBVSolver::NBVSolver(ros::NodeHandle &nh)
 
 
   // Set up the line lists and marker publishers for the visualization of the raycast evaluation.
-  ray_line_list_.header.frame_id = hit_ray_line_list_.header.frame_id = "/volume_pose";
+  ray_line_list_.header.frame_id = hit_ray_line_list_.header.frame_id = REF_FRAME;
   ray_line_list_.scale.x = hit_ray_line_list_.scale.x = 0.0001;
   ray_line_list_.action = hit_ray_line_list_.action = visualization_msgs::Marker::ADD;
   ray_line_list_.pose.orientation.w = hit_ray_line_list_.pose.orientation.w = 1.0;
@@ -49,7 +50,7 @@ bool NBVSolver::GetNBV(nbv_planner::GetNBV::Request &req, nbv_planner::GetNBV::R
   // Download the octomap from octomap_server
   ROS_INFO("Attempting to get octomap");
   octomap_msgs::GetOctomap srv;
-  ros::service::waitForService("/octomap_full");
+  ros::service::waitForService(OCTOMAP_SERVICE);
   if (!octomap_client_.call(srv))
   {
     ROS_INFO("Couldn't get octomap");
@@ -61,18 +62,12 @@ bool NBVSolver::GetNBV(nbv_planner::GetNBV::Request &req, nbv_planner::GetNBV::R
   octomap::ColorOcTree* my_map = (octomap::ColorOcTree*)abstract_tree;
   octomap::ColorOcTree tree = *my_map;
 
-//  int numLeaves = tree.calcNumNodes();
-//  ROS_INFO_STREAM("Number of nodes: " << numLeaves);
-
   // Make a new octomap using the coordinates of the centers of the unknown voxels within the specified volume bounds.
   octomap::ColorOcTree unknownTree(tree.getResolution());
   std::list<octomath::Vector3> unknownLeafs;
 
   tree.getUnknownLeafCenters(unknownLeafs, bound_min_, bound_max_, 0);
   ROS_INFO_STREAM("Number of unknown leaves: " << unknownLeafs.size());
-
-//  octomath::Vector3 first = unknownLeafs.front();
-//  ROS_INFO_STREAM("First coords: " << first.x() << " " << first.y() << " " << first.z());
 
   // Convert unknown points from octomap vector3's to pcl points and then to a ROS message so they can be published and visualized.
   pcl::PointCloud<pcl::PointXYZ> pclCloud;
@@ -94,16 +89,17 @@ bool NBVSolver::GetNBV(nbv_planner::GetNBV::Request &req, nbv_planner::GetNBV::R
   // Generate many random poses near the volume within certain limits
   ROS_INFO("Making candidate poses...");
   candidate_poses_.clear();
+
   std::list<tf::Transform> poses;
-//  tf::Transform orbitCenter(tf::Quaternion(0,0,0,1), tf::Vector3((bound_min_.x()-bound_max_.x())/2, (bound_min_.y()-bound_max_.y())/2, (bound_max_.z()-bound_min_.z())/2));
-  GenerateViewPosesRandom(64, 0, 2*M_PI, M_PI/16, M_PI/2, 0.5, 0.75, poses);
+  //  tf::Transform orbitCenter(tf::Quaternion(0,0,0,1), tf::Vector3((bound_min_.x()-bound_max_.x())/2, (bound_min_.y()-bound_max_.y())/2, (bound_max_.z()-bound_min_.z())/2));
+  GenerateViewPosesRandom(64, 0, 2*M_PI, M_PI/16, M_PI/2, 0.5, 0.75, poses);//poses are in the volume pose frame
 
 
   // Evaluate the list of poses to find the ones that can see the most unknown voxels.
   ray_line_list_.points.clear();
   hit_ray_line_list_.points.clear();
 
-//  std::vector<int> viewMetrics;
+  //  std::vector<int> viewMetrics;
   std::vector<std::tuple<tf::Transform, int>> viewsWithMetrics;
 
   for (std::list<tf::Transform>::const_iterator it = poses.begin(); it != poses.end(); ++it)
@@ -111,19 +107,9 @@ bool NBVSolver::GetNBV(nbv_planner::GetNBV::Request &req, nbv_planner::GetNBV::R
     candidate_poses_.push_back(*it);
     int fitness = EvaluateCandidateView(*it, tree, unknownTree);
     ROS_INFO_STREAM("Casts from this view hit " << fitness << " unseen voxels.");
-//    viewMetrics.push_back(fitness);
     viewsWithMetrics.push_back(std::tuple<tf::Transform, int>(*it, fitness));
   }
 
-//  std::vector<int>::iterator result;
-
-//  result = std::max_element(viewMetrics.begin(), viewMetrics.end());
-//  int indexOfMax = std::distance(viewMetrics.begin(), result);
-
-//  std::list<tf::Transform>::iterator poseIt = candidate_poses_.begin();
-//  std::advance(poseIt, indexOfMax);
-
-//  ROS_INFO_STREAM("Best view is # " << indexOfMax);
 
   // Sort the list of views in order from most unknown voxels exposed to least.
   std::sort( viewsWithMetrics.begin(), viewsWithMetrics.end(), [ ]( const std::tuple<tf::Transform, int>& a, const std::tuple<tf::Transform, int>& b )
@@ -142,18 +128,15 @@ bool NBVSolver::GetNBV(nbv_planner::GetNBV::Request &req, nbv_planner::GetNBV::R
     res.exploration_done = false;
   }
 
-  res.bestViewPose.header.frame_id = REF_FRAME;
+  res.bestViewPose.header.frame_id = REF_FRAME;//nominally /volume_pose
   res.bestViewPose.header.stamp = ros::Time::now();
 
   // Return the list of candidate poses.
-  tf::StampedTransform base_to_volume;
-  listener_.waitForTransform("base_link", REF_FRAME, ros::Time::now(), ros::Duration(0.5));
-  listener_.lookupTransform("base_link", REF_FRAME, ros::Time(0), base_to_volume);
-
+  //input is tf::transform and output is geometry_msgs::Pose
   for (int i = 0; i < viewsWithMetrics.size(); i++) {
     ROS_INFO_STREAM(std::get<1>(viewsWithMetrics[i]));
     geometry_msgs::Pose aPose;
-    tf::poseTFToMsg(tf::Transform(base_to_volume.getRotation(), base_to_volume.getOrigin()) * std::get<0>(viewsWithMetrics[i]), aPose);
+    tf::poseTFToMsg(std::get<0>(viewsWithMetrics[i]), aPose);
     res.bestViewPose.poses.push_back(aPose);
   }
   ROS_INFO_STREAM("Best pose (base-relative): " << res.bestViewPose.poses.front());
@@ -164,6 +147,7 @@ bool NBVSolver::GetNBV(nbv_planner::GetNBV::Request &req, nbv_planner::GetNBV::R
 }
 
 // Legacy code: generate poses evenly distributed around a sphere at a constant distance from some center point.
+//should be overloaded with Poses not transforms
 void NBVSolver::GenerateViewPosesSpherical(float distance, int slices, float yawMin, float yawMax, float pitchMin, float pitchMax, tf::Transform &origin, std::list<tf::Transform> &poseList)
 {
   tf::Transform offset(tf::Quaternion(tf::Vector3(0,0,1), tfScalar(0)), tf::Vector3(-distance, 0, 0));
@@ -286,7 +270,19 @@ void NBVSolver::Update()
   int count = 0;
   for (std::list<tf::Transform>::iterator it = candidate_poses_.begin(); it != candidate_poses_.end(); ++it, count++)
   {
-    tf::StampedTransform transformStamped(*it, ros::Time::now(), "volume_pose", "candidate" + std::to_string(count));
+    tf::StampedTransform transformStamped(*it, ros::Time::now(), REF_FRAME, "candidate" + std::to_string(count));
+    /*
+    ROS_INFO_STREAM("+++++++++++++++++++++++++++++++++++++++");
+    ROS_INFO_STREAM("CANDIDATE POSE FRAME = " << transformStamped.frame_id_);
+    ROS_INFO_STREAM("CANDIDATE POSE ORIGIN X = " << transformStamped.getOrigin().getX());
+    ROS_INFO_STREAM("CANDIDATE POSE ORIGIN Y = " << transformStamped.getOrigin().getY());
+    ROS_INFO_STREAM("CANDIDATE POSE ORIGIN Z = " << transformStamped.getOrigin().getZ());
+    ROS_INFO_STREAM("CANDIDATE POSE QUATERNION QX = " << transformStamped.getRotation().getX());
+    ROS_INFO_STREAM("CANDIDATE POSE QUATERNION QY = " << transformStamped.getRotation().getY());
+    ROS_INFO_STREAM("CANDIDATE POSE QUATERNION QZ = " << transformStamped.getRotation().getZ());
+    ROS_INFO_STREAM("CANDIDATE POSE QUATERNION QW = " << transformStamped.getRotation().getW());
+    ROS_INFO_STREAM("+++++++++++++++++++++++++++++++++++++++");
+    */
     broadcaster_.sendTransform(transformStamped);
 
   }
