@@ -18,6 +18,7 @@
 #include <sensor_msgs/Image.h>
 #include <tf/tf.h>
 #include <tf/transform_broadcaster.h>
+#include <std_srvs/Empty.h>
 
 #include <yak/GetTSDF.h>
 #include <yak/TSDF.h>
@@ -112,6 +113,8 @@ namespace kfusion
 
              bool GetTSDFData(uint32_t input,  half_float::half& voxelValue, uint16_t& voxelWeight);
 
+             bool PublishCloud(std_srvs::Empty::Request &req, std_srvs::Empty::Response &resp);
+
              Affine3f TransformToAffine(tf::Transform input);
 
 //             tf::Transform SwitchToVolumeFrame(tf::Transform input);
@@ -126,8 +129,12 @@ namespace kfusion
             ros::Publisher raycastImgPublisher_;
             std::string baseFrame_;
             std::string cameraFrame_;
+
+            //std::string pose_hint_base_;
+            //std::string pose_hint_camera_frame_;
             tf::TransformBroadcaster tfBroadcaster_;
             tf::TransformListener tfListener_;
+            ros::Publisher cloud_pub_;
 
             //tf::Transform camera_to_tool0_;
 
@@ -142,6 +149,7 @@ namespace kfusion
             ros::ServiceServer get_tsdf_server_;
             ros::ServiceServer get_sparse_tsdf_server_;
             ros::ServiceServer reset_volume_server_;
+            ros::ServiceServer publish_cloud_server_;
 
             bool use_pose_hints_;
     };

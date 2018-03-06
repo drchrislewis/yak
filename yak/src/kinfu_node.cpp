@@ -5,6 +5,7 @@
 #include <sensor_msgs/Image.h>
 #include <tf/tf.h>
 #include <tf/transform_broadcaster.h>
+#include <tf/transform_listener.h>
 #include <yak/ros/kinfu_server.h>
 
 #include <interactive_markers/interactive_marker_server.h>
@@ -34,6 +35,13 @@ int main(int argc, char* argv[])
     node.param<std::string>("camera_frame", cameraFrame, "/camera_depth_optical_frame");
     ROS_INFO_STREAM("Fixed frame: " + fixedFrame + " Camera frame: " + cameraFrame);
 
+    tf::TransformListener listener;
+    ros::Duration(1).sleep();
+    if(!listener.waitForTransform(fixedFrame, cameraFrame, ros::Time::now(), ros::Duration(5.0)))
+    {
+      ROS_ERROR_STREAM("Could not find transform from frame " << fixedFrame << " to frame " <<  cameraFrame << "  Closing TSDF node. ");
+      //return -1;
+    }
     KinFuServer app(&camera, fixedFrame, cameraFrame);
     app.ExecuteBlocking();
 

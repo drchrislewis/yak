@@ -2,6 +2,13 @@ cmake_minimum_required(VERSION 2.8.3)
 project(yak)
 add_definitions(-std=c++11)
 
+find_package(PCL 1.8 REQUIRED COMPONENTS common gpu)
+
+#set(LD_LIBRARY_PATH "${LD_LIBRARY_PATH}:/usr/local/cuda/lib64:/usr/lib/nvidia-384:/usr/lib32/nvidia-384:/usr/local/cuda/extras/CUPTI/lib64")
+#set(LD_LIBRARY_PATH "${LD_LIBRARY_PATH}:/usr/local/cuda/lib64")
+set(CUDA_HOME "/usr/local/cuda")
+message("LD library path: "  ${LD_LIBRARY_PATH})
+
 #compute flags macros
 MACRO(CUDA_COMPUTE_TARGET_FLAGS arch_bin arch_ptx cuda_nvcc_target_flags)
     string(REGEX REPLACE "\\." "" ARCH_BIN_WITHOUT_DOTS "${${arch_bin}}")
@@ -49,13 +56,14 @@ message(STATUS "Found OpenCV At ${OpenCV_INCLUDE_DIRS}")
 #find_library(OPENVDB_LIBRARY NAMES openvdb)
 #find_library(TBB_LIBRARY NAMES tbb)
 #find_library(HALF_LIBRARY NAMES Half)
-find_library(PCL 1.8 REQUIRED COMPONENTS common gpu)
+find_library(PCL 1.8 REQUIRED)
 
-find_package(CUDA REQUIRED)
+find_package(CUDA 8.0 REQUIRED)
+message("CUDA VERSION: " ${CUDA_VERSION_STRING})
 if(${CUDA_VERSION_STRING} VERSION_GREATER "4.1")
-        set(CUDA_ARCH_BIN "2.0 2.1(2.0) 3.0 5.0 5.2" CACHE STRING "Specify 'real' GPU architectures to build binaries for, BIN(PTX) format is supported")
+        set(CUDA_ARCH_BIN "3.0" CACHE STRING "Specify 'real' GPU architectures to build binaries for, BIN(PTX) format is supported")
     else()
-        set(CUDA_ARCH_BIN "2.0 2.1(2.0)" CACHE STRING "Specify 'real' GPU architectures to build binaries for, BIN(PTX) format is supported")
+        set(CUDA_ARCH_BIN "3.0" CACHE STRING "Specify 'real' GPU architectures to build binaries for, BIN(PTX) format is supported")
     endif()
 APPEND_TARGET_ARCH_FLAGS()
 message(STATUS "CUDA_BIN_ARCH ${CUDA_ARCH_BIN}")
@@ -67,6 +75,7 @@ find_package(catkin REQUIRED COMPONENTS
   rosconsole
   roscpp
   sensor_msgs
+  std_srvs
   tf
   pcl_ros
   visualization_msgs
@@ -104,12 +113,15 @@ catkin_package(
     rosconsole
     roscpp
     sensor_msgs
+    std_srvs
     tf
     pcl_ros
     visualization_msgs
     tf_conversions
     interactive_markers
     message_runtime
+  DEPENDS
+    PCL
 )
 
 
@@ -122,15 +134,18 @@ include_directories(
 )
 
 #messages for debugging cuda libraries
-#message("debugging")
+message("debugging")
 #message("PCL_INCLUDE_DIRS: ${PCL_INCLUDE_DIRS}")
-#message("CUDA_INCLUDE_DIRS: ${CUDA_INCLUDE_DIRS}")
-#message("CUDA_CUDA_LIBRARY: ${CUDA_CUDA_LIBRARY}")
-
+message("CUDA_INCLUDE_DIRS: ${CUDA_INCLUDE_DIRS}")
+message("CUDA_CUDA_LIBRARY: ${CUDA_CUDA_LIBRARY}")
+#set(CUDA_CUDA_LIBRARY "/usr/lib/i386-linux-gnu/")
 set(HAVE_CUDA 1)
 #list(APPEND CUDA_NVCC_FLAGS "-arch;compute_20")
-list(APPEND CUDA_NVCC_FLAGS "-gencode;arch=compute_20,code=sm_20;-gencode;arch=compute_20,code=sm_21;-gencode;arch=compute_30,code=sm_30;-gencode;arch=compute_35,code=sm_35")
-  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler;-fPIC;")
+#list(APPEND CUDA_NVCC_FLAGS "-gencode;arch=compute_20,code=sm_20;-gencode;arch=compute_20,code=sm_21;-gencode;arch=compute_30,code=sm_30;-gencode;arch=compute_35,code=sm_35")
+#  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler;-fPIC;")
+list(APPEND CUDA_NVCC_FLAGS "-gencode;arch=compute_30,code=sm_30;-gencode;arch=compute_35,code=sm_35;")
+list(APPEND CUDA_NVCC_FLAGS "-Xcompiler;-fPIC;-lcuda;")
+
 
 link_directories(${PCL_LIBRARY_DIRS})
 
@@ -156,6 +171,7 @@ add_dependencies(yak ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGE
    ${CUDA_LIBRARIES}
    ${CUDA_CUDA_LIBRARY}
    ${OpenCV_LIBS}
+   ${PCL_LIBRARIES}
  )
 
 add_executable(kinfu_node
@@ -178,18 +194,21 @@ target_link_libraries(kinfu_node
  ${CUDA_LIBRARIES}
  ${CUDA_CUDA_LIBRARY}
  ${OpenCV_LIBS}
+ ${PCL_LIBRARIES}
 )
 
 target_link_libraries(volume_tf_broadcaster
  yak
  ${catkin_LIBRARIES}
  ${OpenCV_LIBS}
+ ${PCL_LIBRARIES}
 )
 
 target_link_libraries(volume_marker
  yak
  ${catkin_LIBRARIES}
  ${OpenCV_LIBS}
+ ${PCL_LIBRARIES}
 )
 
 install(TARGETS yak kinfu_node

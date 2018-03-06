@@ -17,6 +17,7 @@
   <depend>rosconsole</depend>
   <depend>roscpp</depend>
   <depend>sensor_msgs</depend>
+  <depend>std_srvs</depend>
   <depend>tf</depend>
   <depend>pcl_ros</depend>
   <depend>visualization_msgs</depend>

@@ -6,6 +6,8 @@
  */
 
 #include <yak/ros/kinfu_server.h>
+#include <pcl_conversions/pcl_conversions.h>
+#include <sensor_msgs/PointCloud2.h>
 
 namespace kfusion
 {
@@ -13,18 +15,23 @@ namespace kfusion
     KinFuServer::KinFuServer(RosRGBDCamera* camera, const std::string& fixedFrame, const std::string& camFrame) :
             should_exit_(false), camera_(camera), baseFrame_(fixedFrame), cameraFrame_(camFrame)
     {
+        cloud_pub_ = camera->nodeHandle.advertise<sensor_msgs::PointCloud2>("out_cloud", 1, true);
         raycastImgPublisher_ = camera->nodeHandle.advertise<sensor_msgs::Image>("raycast_image", 10);
         get_tsdf_server_ = camera->nodeHandle.advertiseService("get_tsdf", &KinFuServer::GetTSDF,  this);
         get_sparse_tsdf_server_ = camera->nodeHandle.advertiseService("get_sparse_tsdf", &KinFuServer::GetSparseTSDF,  this);
+        publish_cloud_server_ = camera->nodeHandle.advertiseService("publish_cloud", &KinFuServer::PublishCloud,  this);
 
         if (!camera->nodeHandle.getParam("use_pose_hints", use_pose_hints_)) {
           ROS_INFO("Failed to get use_pose_hints flag!");
         }
         ROS_INFO_STREAM("Use pose hints set to " << use_pose_hints_);
         if (use_pose_hints_) {
-          tfListener_.waitForTransform("volume_pose", "ensenso_sensor_optical_frame", ros::Time::now(), ros::Duration(0.5));
-          tfListener_.lookupTransform("volume_pose", "ensenso_sensor_optical_frame", ros::Time(0), previous_volume_to_sensor_transform_);
+          tfListener_.waitForTransform(baseFrame_, cameraFrame_, ros::Time::now(), ros::Duration(0.5));
+          //tfListener_.lookupTransform(cameraFrame_, baseFrame_, ros::Time(0), previous_volume_to_sensor_transform_);
+          tfListener_.lookupTransform(baseFrame_, cameraFrame_, ros::Time(0), previous_volume_to_sensor_transform_);
         }
+
+        cloud_pub_ = camera->nodeHandle.advertise<sensor_msgs::PointCloud2>("out_cloud", 1, true);
     }
 
     void KinFuServer::PublishRaycastImage()
@@ -72,10 +79,12 @@ namespace kfusion
         Affine3f previousCameraPoseHint = Affine3f::Identity();
 
         if (use_pose_hints_) {
-          tfListener_.waitForTransform("volume_pose", "ensenso_sensor_optical_frame", ros::Time::now(), ros::Duration(0.5));
-          tfListener_.lookupTransform("volume_pose", "ensenso_sensor_optical_frame", ros::Time(0), current_volume_to_sensor_transform_);
+          tfListener_.waitForTransform(baseFrame_, cameraFrame_, ros::Time::now(), ros::Duration(0.5));
+          //tfListener_.lookupTransform(cameraFrame_, baseFrame_, ros::Time(0), current_volume_to_sensor_transform_);
+          tfListener_.lookupTransform(baseFrame_, cameraFrame_, ros::Time(0), current_volume_to_sensor_transform_);
 
           tf::Transform past_to_current_sensor = previous_volume_to_sensor_transform_.inverse() * current_volume_to_sensor_transform_;
+
 
 //          lastCameraMotionHint_ = KinFuServer::TransformToAffine(KinFuServer::SwitchToVolumeFrame(past_to_current_sensor));
           currentCameraMotionHint_ = KinFuServer::TransformToAffine(past_to_current_sensor);
@@ -99,8 +108,11 @@ namespace kfusion
 
         }
 
-        PublishTransform();
-
+        if(!use_pose_hints_)
+        {
+          PublishTransform();
+        }
+        //PublishTransform();
     }
 
     bool KinFuServer::ExecuteBlocking()
@@ -192,6 +204,27 @@ namespace kfusion
           tf::Transform initialPose = previous_volume_to_sensor_transform_;
           params.volume_pose.translation(Vec3f(initialPose.getOrigin().x(), initialPose.getOrigin().y(), initialPose.getOrigin().z()));
 
+          float temp_array[9];
+          tf::Matrix3x3 temp_matrix = initialPose.getBasis();
+          float* ptr = &temp_array[0];
+          for(int i = 0; i < 3; ++i)
+          {
+            for(int j = 0; j < 3; ++j)
+            {
+              *ptr = temp_matrix.getColumn(i)[j];
+              ++ptr;
+            }
+          }
+          int t = 3;
+          const cv::Mat matrix = cv::Mat(t,t, CV_32FC1, &temp_array[0]);
+
+          ROS_INFO_STREAM( matrix.at<float>(0) << " " << matrix.at<float>(1) << " " << matrix.at<float>(2));
+          ROS_INFO_STREAM( matrix.at<float>(3) << " " << matrix.at<float>(4) << " " << matrix.at<float>(5) );
+          ROS_INFO_STREAM( matrix.at<float>(6) << " " << matrix.at<float>(7) << " " << matrix.at<float>(8) << "\n");
+          //matrix.val[0] = 0;
+          params.volume_pose.linear(matrix);
+          //params.volume_pose.rotation(matrix);
+
 
 // TODO: Properly set volume pose rotation from robot end effector orientation
 //          Eigen::Matrix3d rotationEigen;
@@ -280,6 +313,21 @@ namespace kfusion
       output.stamp_ = ros::Time::now();
 
       tfBroadcaster_.sendTransform(output);
+      return true;
+    }
+
+    bool KinFuServer::PublishCloud(std_srvs::Empty::Request &req, std_srvs::Empty::Response &resp)
+    {
+
+      pcl::PointCloud<pcl::PointXYZ> cloud;
+      cloud = kinfu_->getCloud();
+      sensor_msgs::PointCloud2 msg;
+      pcl::toROSMsg(cloud, msg);
+      msg.header.stamp = ros::Time::now();
+      msg.header.frame_id = "/turn_table";
+
+      ROS_INFO_STREAM("publishing cloud w/ " << cloud.size() << " points.");
+      cloud_pub_.publish(msg);
       return true;
     }
 

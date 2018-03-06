@@ -197,7 +197,9 @@ bool kfusion::cuda::ProjectiveICP::estimateTransform(const Affine3f& affine, Aff
 
     device::ComputeIcpHelper helper(dist_thres_, angle_thres_);
 
+    //affine = Affine3f::Identity();
     correctedAffine = affine;
+    //correctedAffine = Affine3f::Identity();
 
     // This is equivalent to assuming that the transform between the previous and current pose is identity, i.e. the poses are identical.
     // Changing this to the actual transform between the prev and TF-derived current pose should help the calculation of the new pose.
@@ -226,9 +228,22 @@ bool kfusion::cuda::ProjectiveICP::estimateTransform(const Affine3f& affine, Aff
             double det = cv::determinant(A);
 
             if (fabs(det) < 1e-15 || std::isnan(det))
+            //if ( std::isnan(det))
             {
                 if (std::isnan(det))
+                {
                     cout << "qnan" << endl;
+                }
+                else
+                {
+//                  cout << "determinant error: " << det << "\n";
+//                  cout << "b: " << b.val[0] << " " << b.val[1] << " "<< b.val[2] << " "<< b.val[3] << " "<< b.val[4] << " "<< b.val[5] << "\n";
+//                  cout << A.col(0).val[0] << " " << A.col(1).val[0] << " " << A.col(2).val[0] << "\n";
+//                  cout << A.col(0).val[1] << " " << A.col(1).val[1] << " " << A.col(2).val[1] << "\n";
+//                  cout << A.col(0).val[2] << " " << A.col(1).val[2] << " " << A.col(2).val[2] << "\n";
+//                  cout << "camera intrinsics: " << intr.fx << " " << intr.fy << " " << intr.cx << " " << intr.cy << "\n";
+
+                }
                 return false;
             }
 

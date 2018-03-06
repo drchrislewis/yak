@@ -6,6 +6,8 @@
 #include "yak/kfusion/cuda/projective_icp.hpp"
 #include <vector>
 #include <string>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
 
 namespace kfusion
 {
@@ -71,6 +73,9 @@ namespace kfusion
             const cuda::TsdfVolume& tsdf() const;
             cuda::TsdfVolume& tsdf();
 
+            //const pcl::gpu::TsdfVolume& tsdf() const;
+            //pcl::gpu::TsdfVolume& tsdf();
+
             const cuda::ProjectiveICP& icp() const;
             cuda::ProjectiveICP& icp();
 
@@ -83,6 +88,8 @@ namespace kfusion
             void renderImage(cuda::Image& image, const Affine3f& pose, int flags = 0);
 
             Affine3f getCameraPose(int time = -1) const;
+
+            pcl::PointCloud<pcl::PointXYZ> getCloud();
         private:
             void allocate_buffers();
 
@@ -99,6 +106,7 @@ namespace kfusion
             cuda::Normals normals_;
             cuda::Depth depths_;
 
+            //pcl::gpu::TsdfVolume::Ptr  volume_;
             cv::Ptr<cuda::TsdfVolume> volume_;
             cv::Ptr<cuda::ProjectiveICP> icp_;
     };

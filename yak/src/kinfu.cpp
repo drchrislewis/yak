@@ -2,9 +2,14 @@
 #include "yak/kfusion/internal.hpp"
 #include <stdio.h>
 #include <ros/ros.h>
+//#include <pcl/gpu/utils/internal.hpp>
+
 using namespace std;
 using namespace kfusion;
 using namespace kfusion::cuda;
+
+//using namespace pcl::device;
+
 
 static inline float deg2rad(float alpha)
 {
@@ -74,7 +79,6 @@ kfusion::KinFu::KinFu(const KinFuParams& params) :
     ROS_INFO_STREAM("Volume size set to: " << volume_->getSize());
 //    volume_->setPose(params_.volume_pose);
     volume_->setPose(Affine3f::Identity());
-    ROS_INFO_STREAM("Volume pose set to: " << volume_->getPose().matrix);
     volume_->setRaycastStepFactor(params_.raycast_step_factor);
     volume_->setGradientDeltaFactor(params_.gradient_delta_factor);
 
@@ -86,6 +90,10 @@ kfusion::KinFu::KinFu(const KinFuParams& params) :
 
     allocate_buffers();
     resetVolume();
+    volume_->setPose(params_.volume_pose.matrix);
+    ROS_INFO_STREAM("Volume pose set to: " << volume_->getPose().matrix);
+    ROS_INFO_STREAM("Volume pose set to: " << params_.volume_pose.matrix);
+
     // Need to reserve poses on start, else it crashes.
     poses_.reserve(30000);
 
@@ -180,7 +188,7 @@ void kfusion::KinFu::resetPose()
 
 void kfusion::KinFu::resetVolume()
 {
-    frame_counter_ = 0;
+    //frame_counter_ = 0;
     cout << "Reset Volume" << endl;
     volume_->clear();
 }
@@ -192,12 +200,39 @@ kfusion::Affine3f kfusion::KinFu::getCameraPose(int time) const
     return poses_[time];
 }
 
+pcl::PointCloud<pcl::PointXYZ> kfusion::KinFu::getCloud()
+{
+
+  //DeviceArray<pcl::PointXYZ> cloud_buffer_device_;
+  DeviceArray<kfusion::Point> cloud_buffer_device_;
+  DeviceArray<kfusion::Point> extracted = volume_->fetchCloud(cloud_buffer_device_);
+  //kfusion::Point* points;
+
+  std::vector<kfusion::Point> temp_points(extracted.size());
+  extracted.download (&temp_points[0]);
+  pcl::PointCloud<pcl::PointXYZ> cloud;
+  cloud.resize(temp_points.size());
+
+  #pragma omp parallel
+  for(int i = 0; i < temp_points.size(); ++i)
+  {
+    cloud.points[i].x = temp_points[i].x;
+    cloud.points[i].y = temp_points[i].y;
+    cloud.points[i].z = temp_points[i].z;
+  }
+
+  return cloud;
+}
+
 bool kfusion::KinFu::operator()(const Affine3f& inputCameraMotion, const Affine3f& currentCameraPose, const Affine3f& previousCameraPose, const kfusion::cuda::Depth& depth, const kfusion::cuda::Image& /*image*/)
 {
     const KinFuParams& p = params_;
     const int LEVELS = icp_->getUsedLevelsNum();
 
-    cuda::computeDists(depth, dists_, p.intr);
+    //cuda::computeDists(depth, dists_, p.intr);
+    //std::vector<unsigned short> vals(dists_.cols() * dists_.rows());
+    //dists_.download(&vals[0], dists_.step());
+
     cuda::depthBilateralFilter(depth, curr_.depth_pyr[0], p.bilateral_kernel_size, p.bilateral_sigma_spatial, p.bilateral_sigma_depth);
 
     if (p.icp_truncate_depth_dist > 0)
@@ -216,16 +251,21 @@ bool kfusion::KinFu::operator()(const Affine3f& inputCameraMotion, const Affine3
     cuda::waitAllDefaultStream();
 
     //can't perform more on first frame
-    if (frame_counter_ == 0)
+    ROS_INFO("frame_count: %d", poses_.size());
+    //if (frame_counter_ == 0)
+    if (poses_.size() == 1)
     {
-        volume_->integrate(dists_, poses_.at(poses_.size() - 1), p.intr);
+      //device::integrate(dists_, volume_, poses_.back(), p.intr);
+        //ROS_INFO("number of poses available: %d", poses_.size());
+        volume_->integrate(dists_, poses_.back(), p.intr);
+        poses_.push_back(poses_.back());
 #if defined USE_DEPTH
         curr_.depth_pyr.swap(prev_.depth_pyr);
 #else
         curr_.points_pyr.swap(prev_.points_pyr);
 #endif
         curr_.normals_pyr.swap(prev_.normals_pyr);
-        return ++frame_counter_, false;
+        return true;
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////
@@ -238,11 +278,11 @@ bool kfusion::KinFu::operator()(const Affine3f& inputCameraMotion, const Affine3
 
     // DONE: Make TF listener. Calculate affine transform between last pose and the new pose from TF. Pass this into estimateTransform and don't overwrite it with an identity matrix.
 
-    Affine3f cameraMotion = Affine3f::Identity(); // cuur -> prev
+    Affine3f cameraMotionGuess = Affine3f::Identity(); // cuur -> prev
     Affine3f cameraMotionCorrected;
     Affine3f cameraPoseCorrected = currentCameraPose;
     if (params_.use_pose_hints) {
-      cameraMotion = inputCameraMotion;
+      cameraMotionGuess = inputCameraMotion;
     }
 
     {
@@ -252,32 +292,41 @@ bool kfusion::KinFu::operator()(const Affine3f& inputCameraMotion, const Affine3
 #else
     bool ok = true;
     if (params_.use_icp) {
-        ok =  icp_->estimateTransform(cameraMotion, cameraMotionCorrected, p.intr, curr_.points_pyr, curr_.normals_pyr, prev_.points_pyr, prev_.normals_pyr);
+        ok =  icp_->estimateTransform(cameraMotionGuess, cameraMotionCorrected, p.intr, curr_.points_pyr, curr_.normals_pyr, prev_.points_pyr, prev_.normals_pyr);
         cameraPoseCorrected = previousCameraPose * cameraMotionCorrected;
 
-        ROS_INFO_STREAM("\nMotion Input: " << cameraMotion.matrix << "\nMotion Corrected: " << cameraMotionCorrected.matrix << "\nPose Input: " << currentCameraPose.matrix << "\nPose Corrected: " << cameraPoseCorrected.matrix << "\n");
-//        cameraPoseCorrected = cameraPose;
-//        cameraMotion = cameraMotionCorrected;
+        ROS_INFO_STREAM("\nMotion Input: " << cameraMotionGuess.matrix << "\nMotion Corrected: " << cameraMotionCorrected.matrix << "\nPose Input: " << currentCameraPose.matrix << "\nPose Corrected: " << cameraPoseCorrected.matrix << "\n");
     }
     else {
       cameraPoseCorrected = currentCameraPose;
-      cameraMotionCorrected = cameraMotion;
+      cameraMotionCorrected = cameraMotionGuess;
     }
 
 #endif
         if (!ok)
-            return resetVolume(), resetPose(), false;
+        {
+          ROS_WARN("ICP error, reseting volume and pose.");
+          return resetVolume(), resetPose(), false;
+        }
+
     }
+
+//#if defined USE_DEPTH
+//        curr_.depth_pyr.swap(prev_.depth_pyr);
+//#else
+//        curr_.points_pyr.swap(prev_.points_pyr);
+//#endif
+//        curr_.normals_pyr.swap(prev_.normals_pyr);
 
 //    poses_.push_back(poses_.back() * cameraMotion);
     if (params_.update_via_sensor_motion){
         // Update pose with latest measured pose
         // TODO: Make this not put the estimated sensor pose in the wrong position relative to the global frame.
-        cout << "Updating via motion" << endl;
+        //cout << "Updating via motion" << endl;
         poses_.push_back(poses_.back() * cameraMotionCorrected);
     } else {
         // Update pose estimate using latest camera motion transform
-        cout << "Updating via pose" << endl;
+        //cout << "Updating via pose" << endl;
         poses_.push_back(cameraPoseCorrected);
     }
 
@@ -289,16 +338,23 @@ bool kfusion::KinFu::operator()(const Affine3f& inputCameraMotion, const Affine3
 
     // We do not integrate volume if camera does not move.
     // TODO: As it turns out I do care about this! Leaving the camera in one place introduces a lot of noise. Come up with a better metric for determining motion.
-    float rnorm = (float) cv::norm(cameraMotion.rvec());
-    float tnorm = (float) cv::norm(cameraMotion.translation());
+    float rnorm = (float) cv::norm(cameraMotionGuess.rvec());
+    float tnorm = (float) cv::norm(cameraMotionGuess.translation());
 
-    cout << "Rnorm " << rnorm << "  Tnorm " << tnorm << endl;
-
-    bool integrate = (rnorm + tnorm) / 2 >= p.tsdf_min_camera_movement;
+    //cout << "Rnorm " << rnorm << "  Tnorm " << tnorm << endl;
+    float current_movement = (rnorm + tnorm) / 2.0;
+    bool integrate = current_movement >= p.tsdf_min_camera_movement;
     if (integrate)
     {
+      ROS_WARN("ADDED ANOTHER FRAME!");
+
         //ScopeTime time("tsdf");
+
         volume_->integrate(dists_, poses_.back(), p.intr);
+    }
+    else
+    {
+      ROS_WARN("camera motion (%4.3f) greater than tsdf_min_camera_movement value (%4.3f), not integrating image.", current_movement, p.tsdf_min_camera_movement);
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////
@@ -317,7 +373,7 @@ bool kfusion::KinFu::operator()(const Affine3f& inputCameraMotion, const Affine3
         cuda::waitAllDefaultStream();
     }
 
-    return ++frame_counter_, true;
+    return true;
 }
 
 void kfusion::KinFu::renderImage(cuda::Image& image, int flag)
