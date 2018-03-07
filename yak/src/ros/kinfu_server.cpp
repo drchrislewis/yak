@@ -198,7 +198,7 @@ namespace kfusion
         LoadParam(params.use_icp, "use_icp");
         params.use_pose_hints = use_pose_hints_;
         LoadParam(params.update_via_sensor_motion, "update_via_sensor_motion");
-
+	/*
         if (params.use_pose_hints) {
 //          tf::Transform initialPose = KinFuServer::SwitchToVolumeFrame(previous_volume_to_sensor_transform_);
           tf::Transform initialPose = previous_volume_to_sensor_transform_;
@@ -254,6 +254,18 @@ namespace kfusion
           LoadParam(volPosZ, "volume_pos_z");
           params.volume_pose.translation(Vec3f(volPosX, volPosY, volPosZ));
         }
+	*/
+          float volPosX, volPosY, volPosZ;
+          volPosX = params.volume_pose.translation().val[0];
+          volPosY = params.volume_pose.translation().val[1];
+          volPosZ = params.volume_pose.translation().val[2];
+
+          ROS_INFO_STREAM("volPos (default): " << volPosX << ", " << volPosY << ", " << volPosZ);
+
+          LoadParam(volPosX, "volume_pos_x");
+          LoadParam(volPosY, "volume_pos_y");
+          LoadParam(volPosZ, "volume_pos_z");
+          params.volume_pose.translation(Vec3f(volPosX, volPosY, volPosZ));
 
 
 

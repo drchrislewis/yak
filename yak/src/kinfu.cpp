@@ -229,7 +229,7 @@ bool kfusion::KinFu::operator()(const Affine3f& inputCameraMotion, const Affine3
     const KinFuParams& p = params_;
     const int LEVELS = icp_->getUsedLevelsNum();
 
-    //cuda::computeDists(depth, dists_, p.intr);
+    cuda::computeDists(depth, dists_, p.intr);
     //std::vector<unsigned short> vals(dists_.cols() * dists_.rows());
     //dists_.download(&vals[0], dists_.step());
 
