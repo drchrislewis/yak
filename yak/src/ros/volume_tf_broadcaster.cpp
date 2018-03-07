@@ -9,7 +9,7 @@
 
 class VolumePosePublisher {
   public:
-    VolumePosePublisher(ros::NodeHandle& nh) {
+  VolumePosePublisher(ros::NodeHandle& nh, std::string vframe_id): vframe_id_(vframe_id) {
 //        ROS_INFO("Started constructor");
         lastOriginPose_ = tf::Transform(tf::Quaternion(0,0,0,1), tf::Vector3(0,0,0));
         subscriber_ = nh.subscribe("/volume_marker/feedback", 1, &VolumePosePublisher::volumeTFCallback, this);
@@ -93,7 +93,7 @@ class VolumePosePublisher {
 
       visualization_msgs::Marker box_line_list;
 
-      box_line_list.header.frame_id =  "/volume_pose";
+      box_line_list.header.frame_id =  vframe_id_.c_str();
       box_line_list.scale.x = 0.002;
       box_line_list.action = visualization_msgs::Marker::ADD;
       box_line_list.pose.orientation.w = 1.0;
@@ -141,7 +141,7 @@ class VolumePosePublisher {
       box_line_list.points.push_back(c8);
 
       //todo, make world frame a passed parameter
-      tf::StampedTransform transformStamped(currentOriginPose, ros::Time::now(), "tsdf_frame", "volume_pose");
+      tf::StampedTransform transformStamped(currentOriginPose, ros::Time::now(), "tsdf_frame", vframe_id_.c_str());
 
       broadcaster_.sendTransform(transformStamped);
 
@@ -161,6 +161,7 @@ class VolumePosePublisher {
     ros::Subscriber subscriber_;
     tf::TransformBroadcaster broadcaster_;
     tf::Transform lastOriginPose_;
+    std::string vframe_id_;
 };
 
 //void processFeedback(
@@ -172,8 +173,14 @@ class VolumePosePublisher {
 int main(int argc, char** argv) {
   ros::init(argc, argv, "volume_tf_broadcaster");
   ros::NodeHandle nh;
-
-  VolumePosePublisher vol(nh);
+  std::string frame_id;
+  
+  if (!nh.getParam("tf_base_frame",frame_id)) {
+    ROS_ERROR("Failed to get tf_base_frame, using volumn_pose");
+    frame_id = "volumn_pose";
+  }
+  
+  VolumePosePublisher vol(nh,frame_id);
 //  vol.subscriber_ = nh.subscribe("/volume_marker/feedback", 1000, &VolumePosePublisher::volumeTFCallback, &vol);
 
   ros::Rate rate(10.0);

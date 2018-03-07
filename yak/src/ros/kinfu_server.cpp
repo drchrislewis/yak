@@ -17,13 +17,20 @@ namespace kfusion
         get_tsdf_server_ = camera->nodeHandle.advertiseService("get_tsdf", &KinFuServer::GetTSDF,  this);
         get_sparse_tsdf_server_ = camera->nodeHandle.advertiseService("get_sparse_tsdf", &KinFuServer::GetSparseTSDF,  this);
 
-        if (!camera->nodeHandle.getParam("use_pose_hints", use_pose_hints_)) {
-          ROS_INFO("Failed to get use_pose_hints flag!");
+        if (!camera->nodeHandle.getParam("use_tf_pose",use_tf_pose_)) {
+          ROS_INFO("Failed to get use_tf_pose flag!");
         }
-        ROS_INFO_STREAM("Use pose hints set to " << use_pose_hints_);
-        if (use_pose_hints_) {
-          tfListener_.waitForTransform("volume_pose", "ensenso_sensor_optical_frame", ros::Time::now(), ros::Duration(0.5));
-          tfListener_.lookupTransform("volume_pose", "ensenso_sensor_optical_frame", ros::Time(0), previous_volume_to_sensor_transform_);
+        ROS_INFO_STREAM("Use tf pose set to " << use_tf_pose_);
+        if (use_tf_pose_) {
+	  if (!camera->nodeHandle.getParam("tf_optical_frame",tf_optical_frame_)) {
+	    ROS_ERROR("Failed to get tf_optical_frame, but use_tf_pose was set");
+	  }
+	  if (!camera->nodeHandle.getParam("tf_base_frame ",tf_base_frame_)){
+	    ROS_ERROR("Failed to get tf_base_frame, but use_tf_pose was set");
+	  }
+	  ROS_INFO("using optical_frame = %s base_frame = %s", tf_optical_frame_.c_str(), tf_base_frame_.c_str());
+          tfListener_.waitForTransform(tf_base_frame_.c_str(), tf_optical_frame_.c_str(), ros::Time::now(), ros::Duration(0.5));
+          tfListener_.lookupTransform(tf_base_frame_.c_str(), tf_optical_frame_.c_str(), ros::Time(0), previous_volume_to_sensor_transform_);
         }
     }
 
@@ -71,9 +78,11 @@ namespace kfusion
         // Once we have a new image, find the transform between the poses where the current image and the previous image were captured.
         Affine3f previousCameraPoseHint = Affine3f::Identity();
 
-        if (use_pose_hints_) {
-          tfListener_.waitForTransform("volume_pose", "ensenso_sensor_optical_frame", ros::Time::now(), ros::Duration(0.5));
-          tfListener_.lookupTransform("volume_pose", "ensenso_sensor_optical_frame", ros::Time(0), current_volume_to_sensor_transform_);
+        if (use_tf_pose_) {
+	  //          tfListener_.waitForTransform("volume_pose", "ensenso_sensor_optical_frame", ros::Time::now(), ros::Duration(0.5));
+	  //          tfListener_.lookupTransform("volume_pose", "ensenso_sensor_optical_frame", ros::Time(0), current_volume_to_sensor_transform_);
+          tfListener_.waitForTransform(tf_base_frame_.c_str(), tf_optical_frame_.c_str(), ros::Time::now(), ros::Duration(0.5));
+          tfListener_.lookupTransform(tf_base_frame_.c_str(), tf_optical_frame_.c_str(), ros::Time(0), current_volume_to_sensor_transform_);
 
           tf::Transform past_to_current_sensor = previous_volume_to_sensor_transform_.inverse() * current_volume_to_sensor_transform_;
 
@@ -184,7 +193,7 @@ namespace kfusion
         LoadParam(params.volume_resolution, "volume_resolution");
 
         LoadParam(params.use_icp, "use_icp");
-        params.use_pose_hints = use_pose_hints_;
+        params.use_pose_hints = use_tf_pose_;
         LoadParam(params.update_via_sensor_motion, "update_via_sensor_motion");
 
         if (params.use_pose_hints) {

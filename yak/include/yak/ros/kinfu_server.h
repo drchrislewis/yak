@@ -143,7 +143,10 @@ namespace kfusion
             ros::ServiceServer get_sparse_tsdf_server_;
             ros::ServiceServer reset_volume_server_;
 
-            bool use_pose_hints_;
+            bool use_tf_pose_;
+	    std::string tf_optical_frame_;
+	    std::string tf_base_frame_;
+      
     };
 
 } /* namespace kfusion */
