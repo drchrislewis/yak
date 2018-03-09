@@ -27,8 +27,8 @@ namespace kfusion
         ROS_INFO_STREAM("Use pose hints set to " << use_pose_hints_);
         if (use_pose_hints_) {
           tfListener_.waitForTransform(baseFrame_, cameraFrame_, ros::Time::now(), ros::Duration(0.5));
-          //tfListener_.lookupTransform(cameraFrame_, baseFrame_, ros::Time(0), previous_volume_to_sensor_transform_);
-          tfListener_.lookupTransform(baseFrame_, cameraFrame_, ros::Time(0), previous_volume_to_sensor_transform_);
+          tfListener_.lookupTransform(cameraFrame_, baseFrame_, ros::Time(0), previous_volume_to_sensor_transform_);
+          //tfListener_.lookupTransform(baseFrame_, cameraFrame_, ros::Time(0), previous_volume_to_sensor_transform_);
         }
 
         cloud_pub_ = camera->nodeHandle.advertise<sensor_msgs::PointCloud2>("out_cloud", 1, true);
@@ -70,7 +70,6 @@ namespace kfusion
 
         if (!has_frame)
         {
-            ros::spinOnce();
             return;
         }
 
@@ -105,14 +104,12 @@ namespace kfusion
         if (has_image)
         {
             PublishRaycastImage();
-
         }
 
         if(!use_pose_hints_)
         {
           PublishTransform();
         }
-        //PublishTransform();
     }
 
     bool KinFuServer::ExecuteBlocking()
@@ -324,7 +321,8 @@ namespace kfusion
       sensor_msgs::PointCloud2 msg;
       pcl::toROSMsg(cloud, msg);
       msg.header.stamp = ros::Time::now();
-      msg.header.frame_id = "/turn_table";
+      //msg.header.frame_id = "/turn_table";
+      msg.header.frame_id = baseFrame_;
 
       ROS_INFO_STREAM("publishing cloud w/ " << cloud.size() << " points.");
       cloud_pub_.publish(msg);

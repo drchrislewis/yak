@@ -129,9 +129,6 @@ namespace kfusion
             ros::Publisher raycastImgPublisher_;
             std::string baseFrame_;
             std::string cameraFrame_;
-
-            //std::string pose_hint_base_;
-            //std::string pose_hint_camera_frame_;
             tf::TransformBroadcaster tfBroadcaster_;
             tf::TransformListener tfListener_;
             ros::Publisher cloud_pub_;

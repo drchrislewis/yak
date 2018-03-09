@@ -72,10 +72,7 @@ namespace kfusion
 
             const cuda::TsdfVolume& tsdf() const;
             cuda::TsdfVolume& tsdf();
-
-            //const pcl::gpu::TsdfVolume& tsdf() const;
-            //pcl::gpu::TsdfVolume& tsdf();
-
+            
             const cuda::ProjectiveICP& icp() const;
             cuda::ProjectiveICP& icp();
 
@@ -98,6 +95,7 @@ namespace kfusion
 
             // Sensor pose, currenly calculated  via ICP
             std::vector<Affine3f> poses_;
+            Affine3f last_integrated_pose; //meters
 
             cuda::Dists dists_;
             cuda::Frame curr_, prev_;
@@ -106,7 +104,6 @@ namespace kfusion
             cuda::Normals normals_;
             cuda::Depth depths_;
 
-            //pcl::gpu::TsdfVolume::Ptr  volume_;
             cv::Ptr<cuda::TsdfVolume> volume_;
             cv::Ptr<cuda::ProjectiveICP> icp_;
     };

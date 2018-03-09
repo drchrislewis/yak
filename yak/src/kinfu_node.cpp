@@ -31,16 +31,21 @@ int main(int argc, char* argv[])
     std::string fixedFrame;
     std::string cameraFrame;
 
+    bool use_hints = false;
     node.param<std::string>("fixed_frame", fixedFrame, "/map");
     node.param<std::string>("camera_frame", cameraFrame, "/camera_depth_optical_frame");
+    node.param<bool>("use_pose_hints", use_hints);
     ROS_INFO_STREAM("Fixed frame: " + fixedFrame + " Camera frame: " + cameraFrame);
 
     tf::TransformListener listener;
     ros::Duration(1).sleep();
-    if(!listener.waitForTransform(fixedFrame, cameraFrame, ros::Time::now(), ros::Duration(5.0)))
+    if(use_hints)
     {
-      ROS_ERROR_STREAM("Could not find transform from frame " << fixedFrame << " to frame " <<  cameraFrame << "  Closing TSDF node. ");
-      //return -1;
+      if(!listener.waitForTransform(fixedFrame, cameraFrame, ros::Time::now(), ros::Duration(5.0)))
+      {
+        ROS_ERROR_STREAM("Could not find transform from frame " << fixedFrame << " to frame " <<  cameraFrame << ".  Turning off 'use_pose_hints'. ");
+        node.setParam("use_pose_hints", false);
+      }
     }
     KinFuServer app(&camera, fixedFrame, cameraFrame);
     app.ExecuteBlocking();

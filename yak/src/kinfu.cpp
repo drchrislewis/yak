@@ -2,14 +2,9 @@
 #include "yak/kfusion/internal.hpp"
 #include <stdio.h>
 #include <ros/ros.h>
-//#include <pcl/gpu/utils/internal.hpp>
-
 using namespace std;
 using namespace kfusion;
 using namespace kfusion::cuda;
-
-//using namespace pcl::device;
-
 
 static inline float deg2rad(float alpha)
 {
@@ -229,7 +224,7 @@ bool kfusion::KinFu::operator()(const Affine3f& inputCameraMotion, const Affine3
     const KinFuParams& p = params_;
     const int LEVELS = icp_->getUsedLevelsNum();
 
-    //cuda::computeDists(depth, dists_, p.intr);
+    cuda::computeDists(depth, dists_, p.intr);
     //std::vector<unsigned short> vals(dists_.cols() * dists_.rows());
     //dists_.download(&vals[0], dists_.step());
 
@@ -255,9 +250,9 @@ bool kfusion::KinFu::operator()(const Affine3f& inputCameraMotion, const Affine3
     //if (frame_counter_ == 0)
     if (poses_.size() == 1)
     {
-      //device::integrate(dists_, volume_, poses_.back(), p.intr);
-        //ROS_INFO("number of poses available: %d", poses_.size());
         volume_->integrate(dists_, poses_.back(), p.intr);
+        last_integrated_pose = poses_.back();
+
         poses_.push_back(poses_.back());
 #if defined USE_DEPTH
         curr_.depth_pyr.swap(prev_.depth_pyr);
@@ -279,8 +274,8 @@ bool kfusion::KinFu::operator()(const Affine3f& inputCameraMotion, const Affine3
     // DONE: Make TF listener. Calculate affine transform between last pose and the new pose from TF. Pass this into estimateTransform and don't overwrite it with an identity matrix.
 
     Affine3f cameraMotionGuess = Affine3f::Identity(); // cuur -> prev
-    Affine3f cameraMotionCorrected;
-    Affine3f cameraPoseCorrected = currentCameraPose;
+    Affine3f icpMotionResults;
+    Affine3f cameraPoseCorrected;
     if (params_.use_pose_hints) {
       cameraMotionGuess = inputCameraMotion;
     }
@@ -291,15 +286,20 @@ bool kfusion::KinFu::operator()(const Affine3f& inputCameraMotion, const Affine3
         bool ok = icp_->estimateTransform(affine, p.intr, curr_.depth_pyr, curr_.normals_pyr, prev_.depth_pyr, prev_.normals_pyr);
 #else
     bool ok = true;
-    if (params_.use_icp) {
-        ok =  icp_->estimateTransform(cameraMotionGuess, cameraMotionCorrected, p.intr, curr_.points_pyr, curr_.normals_pyr, prev_.points_pyr, prev_.normals_pyr);
-        cameraPoseCorrected = previousCameraPose * cameraMotionCorrected;
+    if (params_.use_icp)
+    {
+      // perform ICP using the motion estimate
+      ok =  icp_->estimateTransform(cameraMotionGuess, icpMotionResults, p.intr, curr_.points_pyr, curr_.normals_pyr, prev_.points_pyr, prev_.normals_pyr);
 
-        ROS_INFO_STREAM("\nMotion Input: " << cameraMotionGuess.matrix << "\nMotion Corrected: " << cameraMotionCorrected.matrix << "\nPose Input: " << currentCameraPose.matrix << "\nPose Corrected: " << cameraPoseCorrected.matrix << "\n");
+      // new camera position = last camera position * ICP motion results
+      cameraPoseCorrected = poses_.back() * icpMotionResults;
+
+        //ROS_INFO_STREAM("\nMotion Input: " << cameraMotionGuess.matrix << "\nMotion Corrected: " << cameraMotionCorrected.matrix << "\nPose Input: " << currentCameraPose.matrix << "\nPose Corrected: " << cameraPoseCorrected.matrix << "\n");
     }
-    else {
+    else
+    {
+      // if ICP is not being used, only use the input camera position to update
       cameraPoseCorrected = currentCameraPose;
-      cameraMotionCorrected = cameraMotionGuess;
     }
 
 #endif
@@ -311,24 +311,8 @@ bool kfusion::KinFu::operator()(const Affine3f& inputCameraMotion, const Affine3
 
     }
 
-//#if defined USE_DEPTH
-//        curr_.depth_pyr.swap(prev_.depth_pyr);
-//#else
-//        curr_.points_pyr.swap(prev_.points_pyr);
-//#endif
-//        curr_.normals_pyr.swap(prev_.normals_pyr);
-
-//    poses_.push_back(poses_.back() * cameraMotion);
-    if (params_.update_via_sensor_motion){
-        // Update pose with latest measured pose
-        // TODO: Make this not put the estimated sensor pose in the wrong position relative to the global frame.
-        //cout << "Updating via motion" << endl;
-        poses_.push_back(poses_.back() * cameraMotionCorrected);
-    } else {
-        // Update pose estimate using latest camera motion transform
-        //cout << "Updating via pose" << endl;
-        poses_.push_back(cameraPoseCorrected);
-    }
+    // save the latest camera pose
+    poses_.push_back(cameraPoseCorrected);
 
     ///////////////////////////////////////////////////////////////////////////////////////////
     // Volume integration
@@ -336,21 +320,23 @@ bool kfusion::KinFu::operator()(const Affine3f& inputCameraMotion, const Affine3
     // This is the transform from the origin of the volume to the camera.
     cout << "Newest pose is  " << poses_.back().matrix << endl;
 
+    // calculate motion between the latest frame and the last integrated frame
     // We do not integrate volume if camera does not move.
     // TODO: As it turns out I do care about this! Leaving the camera in one place introduces a lot of noise. Come up with a better metric for determining motion.
-    float rnorm = (float) cv::norm(cameraMotionGuess.rvec());
-    float tnorm = (float) cv::norm(cameraMotionGuess.translation());
+    Affine3f integrated_distance = last_integrated_pose * poses_.back();
+    float rnorm = (float) cv::norm(integrated_distance.rvec());
+    float tnorm = (float) cv::norm(integrated_distance.translation());
 
     //cout << "Rnorm " << rnorm << "  Tnorm " << tnorm << endl;
     float current_movement = (rnorm + tnorm) / 2.0;
     bool integrate = current_movement >= p.tsdf_min_camera_movement;
     if (integrate)
     {
-      ROS_WARN("ADDED ANOTHER FRAME!");
-
+      ROS_WARN("Camera motion: %4.3f, ADDED ANOTHER_FRAME!", current_movement);
         //ScopeTime time("tsdf");
 
         volume_->integrate(dists_, poses_.back(), p.intr);
+        last_integrated_pose = poses_.back();
     }
     else
     {
