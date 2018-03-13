@@ -35,6 +35,7 @@ namespace kfusion
             float volume_resolution; // meters per voxel
 
             Affine3f volume_pose; //meters, inital pose
+            Affine3f camera_pose; //meters, camera initial pose (if using pose hints)
 
             float bilateral_sigma_depth;   //meters
             float bilateral_sigma_spatial;   //pixels
@@ -79,7 +80,7 @@ namespace kfusion
             void resetPose();
             void resetVolume();
 
-            bool operator()(const Affine3f& inputCameraMotion, const Affine3f& currentCameraPose, const Affine3f& previousCameraPose, const cuda::Depth& depth, const cuda::Image& image = cuda::Image());
+            bool operator()(const Affine3f& inputCameraMotion, const Affine3f& currentCameraPose, const cuda::Depth& depth, const cuda::Image& image = cuda::Image());
 
             void renderImage(cuda::Image& image, int flags = 0);
             void renderImage(cuda::Image& image, const Affine3f& pose, int flags = 0);

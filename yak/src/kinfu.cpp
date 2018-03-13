@@ -72,7 +72,7 @@ kfusion::KinFu::KinFu(const KinFuParams& params) :
     Vec3f volumeSize(params_.volume_dims[0]*params_.volume_resolution, params_.volume_dims[1]*params_.volume_resolution, params_.volume_dims[2]*params_.volume_resolution);
     volume_->setSize(volumeSize);
     ROS_INFO_STREAM("Volume size set to: " << volume_->getSize());
-//    volume_->setPose(params_.volume_pose);
+
     volume_->setPose(Affine3f::Identity());
     volume_->setRaycastStepFactor(params_.raycast_step_factor);
     volume_->setGradientDeltaFactor(params_.gradient_delta_factor);
@@ -83,17 +83,25 @@ kfusion::KinFu::KinFu(const KinFuParams& params) :
     icp_->setAngleThreshold(params_.icp_angle_thres);
     icp_->setIterationsNum(params_.icp_iter_num);
 
+    // set the volume size and origin
     allocate_buffers();
     resetVolume();
     volume_->setPose(params_.volume_pose.matrix);
     ROS_INFO_STREAM("Volume pose set to: " << volume_->getPose().matrix);
-    ROS_INFO_STREAM("Volume pose set to: " << params_.volume_pose.matrix);
 
     // Need to reserve poses on start, else it crashes.
-    poses_.reserve(30000);
+    resetPose();
+    //poses_.reserve(30000);
 
-    // TODO: Allow loading of robot pose instead of default volume pose
-    poses_.push_back(params_.volume_pose.matrix);
+    // if using pose hints, use the camera pose as the starting location (not the same as the volume origin/offset)
+    if(!params_.use_pose_hints)
+    {
+      poses_.push_back(Affine3f::Identity().matrix);
+    }
+    else
+    {
+      poses_.push_back(params_.camera_pose.matrix);
+    }
 }
 
 const kfusion::KinFuParams& kfusion::KinFu::params() const
@@ -175,8 +183,15 @@ void kfusion::KinFu::resetPose()
     poses_.reserve(30000);
 
     // TODO: Allow loading of robot pose instead of default volume pose
-    poses_.push_back(params_.volume_pose.matrix);
-    cout << "Resetting to: " << params_.volume_pose.matrix << endl;
+    if(!params_.use_pose_hints)
+    {
+      poses_.push_back(Affine3f::Identity().matrix);
+    }
+    else
+    {
+      poses_.push_back(params_.camera_pose.matrix);
+    }
+    cout << "Resetting to: " << poses_.back().matrix << endl;
 
 //    volume_->clear();
 }
@@ -219,7 +234,7 @@ pcl::PointCloud<pcl::PointXYZ> kfusion::KinFu::getCloud()
   return cloud;
 }
 
-bool kfusion::KinFu::operator()(const Affine3f& inputCameraMotion, const Affine3f& currentCameraPose, const Affine3f& previousCameraPose, const kfusion::cuda::Depth& depth, const kfusion::cuda::Image& /*image*/)
+bool kfusion::KinFu::operator()(const Affine3f& inputCameraMotion, const Affine3f& currentCameraPose, const kfusion::cuda::Depth& depth, const kfusion::cuda::Image& /*image*/)
 {
     const KinFuParams& p = params_;
     const int LEVELS = icp_->getUsedLevelsNum();
@@ -246,7 +261,7 @@ bool kfusion::KinFu::operator()(const Affine3f& inputCameraMotion, const Affine3
     cuda::waitAllDefaultStream();
 
     //can't perform more on first frame
-    ROS_INFO("frame_count: %d", poses_.size());
+    //ROS_INFO("frame_count: %d", poses_.size());
     //if (frame_counter_ == 0)
     if (poses_.size() == 1)
     {
@@ -277,6 +292,7 @@ bool kfusion::KinFu::operator()(const Affine3f& inputCameraMotion, const Affine3
     Affine3f icpMotionResults;
     Affine3f cameraPoseCorrected;
     if (params_.use_pose_hints) {
+      // TODO: should the guess use the last camera motion or the new TF lookup frame? Or both?
       cameraMotionGuess = inputCameraMotion;
     }
 
@@ -294,7 +310,7 @@ bool kfusion::KinFu::operator()(const Affine3f& inputCameraMotion, const Affine3
       // new camera position = last camera position * ICP motion results
       cameraPoseCorrected = poses_.back() * icpMotionResults;
 
-        //ROS_INFO_STREAM("\nMotion Input: " << cameraMotionGuess.matrix << "\nMotion Corrected: " << cameraMotionCorrected.matrix << "\nPose Input: " << currentCameraPose.matrix << "\nPose Corrected: " << cameraPoseCorrected.matrix << "\n");
+      //ROS_INFO_STREAM("\nMotion Input: " << cameraMotionGuess.matrix << "\nPose Input: " << currentCameraPose.matrix << "\nPose Corrected: " << cameraPoseCorrected.matrix << "\n");
     }
     else
     {
@@ -317,30 +333,23 @@ bool kfusion::KinFu::operator()(const Affine3f& inputCameraMotion, const Affine3
     ///////////////////////////////////////////////////////////////////////////////////////////
     // Volume integration
 
-    // This is the transform from the origin of the volume to the camera.
-    cout << "Newest pose is  " << poses_.back().matrix << endl;
-
     // calculate motion between the latest frame and the last integrated frame
     // We do not integrate volume if camera does not move.
-    // TODO: As it turns out I do care about this! Leaving the camera in one place introduces a lot of noise. Come up with a better metric for determining motion.
-    Affine3f integrated_distance = last_integrated_pose * poses_.back();
+    Affine3f integrated_distance = last_integrated_pose.inv() * poses_.back();
     float rnorm = (float) cv::norm(integrated_distance.rvec());
     float tnorm = (float) cv::norm(integrated_distance.translation());
 
-    //cout << "Rnorm " << rnorm << "  Tnorm " << tnorm << endl;
     float current_movement = (rnorm + tnorm) / 2.0;
     bool integrate = current_movement >= p.tsdf_min_camera_movement;
     if (integrate)
     {
-      ROS_WARN("Camera motion: %4.3f, ADDED ANOTHER_FRAME!", current_movement);
         //ScopeTime time("tsdf");
-
-        volume_->integrate(dists_, poses_.back(), p.intr);
-        last_integrated_pose = poses_.back();
+      last_integrated_pose = poses_.back();
+      volume_->integrate(dists_, poses_.back(), p.intr);
     }
     else
     {
-      ROS_WARN("camera motion (%4.3f) greater than tsdf_min_camera_movement value (%4.3f), not integrating image.", current_movement, p.tsdf_min_camera_movement);
+      ROS_WARN_THROTTLE(2, "camera motion (%4.3f) is less than tsdf_min_camera_movement value (%4.3f), not integrating image.", current_movement, p.tsdf_min_camera_movement);
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////
