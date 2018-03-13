@@ -2,14 +2,9 @@
 #include "yak/kfusion/internal.hpp"
 #include <stdio.h>
 #include <ros/ros.h>
-//#include <pcl/gpu/utils/internal.hpp>
-
 using namespace std;
 using namespace kfusion;
 using namespace kfusion::cuda;
-
-//using namespace pcl::device;
-
 
 static inline float deg2rad(float alpha)
 {
@@ -77,7 +72,7 @@ kfusion::KinFu::KinFu(const KinFuParams& params) :
     Vec3f volumeSize(params_.volume_dims[0]*params_.volume_resolution, params_.volume_dims[1]*params_.volume_resolution, params_.volume_dims[2]*params_.volume_resolution);
     volume_->setSize(volumeSize);
     ROS_INFO_STREAM("Volume size set to: " << volume_->getSize());
-//    volume_->setPose(params_.volume_pose);
+
     volume_->setPose(Affine3f::Identity());
     volume_->setRaycastStepFactor(params_.raycast_step_factor);
     volume_->setGradientDeltaFactor(params_.gradient_delta_factor);
@@ -88,17 +83,25 @@ kfusion::KinFu::KinFu(const KinFuParams& params) :
     icp_->setAngleThreshold(params_.icp_angle_thres);
     icp_->setIterationsNum(params_.icp_iter_num);
 
+    // set the volume size and origin
     allocate_buffers();
     resetVolume();
     volume_->setPose(params_.volume_pose.matrix);
     ROS_INFO_STREAM("Volume pose set to: " << volume_->getPose().matrix);
-    ROS_INFO_STREAM("Volume pose set to: " << params_.volume_pose.matrix);
 
     // Need to reserve poses on start, else it crashes.
-    poses_.reserve(30000);
+    resetPose();
+    //poses_.reserve(30000);
 
-    // TODO: Allow loading of robot pose instead of default volume pose
-    poses_.push_back(params_.volume_pose.matrix);
+    // if using pose hints, use the camera pose as the starting location (not the same as the volume origin/offset)
+    if(!params_.use_pose_hints)
+    {
+      poses_.push_back(Affine3f::Identity().matrix);
+    }
+    else
+    {
+      poses_.push_back(params_.camera_pose.matrix);
+    }
 }
 
 const kfusion::KinFuParams& kfusion::KinFu::params() const
@@ -180,8 +183,15 @@ void kfusion::KinFu::resetPose()
     poses_.reserve(30000);
 
     // TODO: Allow loading of robot pose instead of default volume pose
-    poses_.push_back(params_.volume_pose.matrix);
-    cout << "Resetting to: " << params_.volume_pose.matrix << endl;
+    if(!params_.use_pose_hints)
+    {
+      poses_.push_back(Affine3f::Identity().matrix);
+    }
+    else
+    {
+      poses_.push_back(params_.camera_pose.matrix);
+    }
+    cout << "Resetting to: " << poses_.back().matrix << endl;
 
 //    volume_->clear();
 }
@@ -224,7 +234,7 @@ pcl::PointCloud<pcl::PointXYZ> kfusion::KinFu::getCloud()
   return cloud;
 }
 
-bool kfusion::KinFu::operator()(const Affine3f& inputCameraMotion, const Affine3f& currentCameraPose, const Affine3f& previousCameraPose, const kfusion::cuda::Depth& depth, const kfusion::cuda::Image& /*image*/)
+bool kfusion::KinFu::operator()(const Affine3f& inputCameraMotion, const Affine3f& currentCameraPose, const kfusion::cuda::Depth& depth, const kfusion::cuda::Image& /*image*/)
 {
     const KinFuParams& p = params_;
     const int LEVELS = icp_->getUsedLevelsNum();
@@ -251,13 +261,13 @@ bool kfusion::KinFu::operator()(const Affine3f& inputCameraMotion, const Affine3
     cuda::waitAllDefaultStream();
 
     //can't perform more on first frame
-    ROS_INFO("frame_count: %d", poses_.size());
+    //ROS_INFO("frame_count: %d", poses_.size());
     //if (frame_counter_ == 0)
     if (poses_.size() == 1)
     {
-      //device::integrate(dists_, volume_, poses_.back(), p.intr);
-        //ROS_INFO("number of poses available: %d", poses_.size());
         volume_->integrate(dists_, poses_.back(), p.intr);
+        last_integrated_pose = poses_.back();
+
         poses_.push_back(poses_.back());
 #if defined USE_DEPTH
         curr_.depth_pyr.swap(prev_.depth_pyr);
@@ -279,9 +289,10 @@ bool kfusion::KinFu::operator()(const Affine3f& inputCameraMotion, const Affine3
     // DONE: Make TF listener. Calculate affine transform between last pose and the new pose from TF. Pass this into estimateTransform and don't overwrite it with an identity matrix.
 
     Affine3f cameraMotionGuess = Affine3f::Identity(); // cuur -> prev
-    Affine3f cameraMotionCorrected;
-    Affine3f cameraPoseCorrected = currentCameraPose;
+    Affine3f icpMotionResults;
+    Affine3f cameraPoseCorrected;
     if (params_.use_pose_hints) {
+      // TODO: should the guess use the last camera motion or the new TF lookup frame? Or both?
       cameraMotionGuess = inputCameraMotion;
     }
 
@@ -291,15 +302,20 @@ bool kfusion::KinFu::operator()(const Affine3f& inputCameraMotion, const Affine3
         bool ok = icp_->estimateTransform(affine, p.intr, curr_.depth_pyr, curr_.normals_pyr, prev_.depth_pyr, prev_.normals_pyr);
 #else
     bool ok = true;
-    if (params_.use_icp) {
-        ok =  icp_->estimateTransform(cameraMotionGuess, cameraMotionCorrected, p.intr, curr_.points_pyr, curr_.normals_pyr, prev_.points_pyr, prev_.normals_pyr);
-        cameraPoseCorrected = previousCameraPose * cameraMotionCorrected;
+    if (params_.use_icp)
+    {
+      // perform ICP using the motion estimate
+      ok =  icp_->estimateTransform(cameraMotionGuess, icpMotionResults, p.intr, curr_.points_pyr, curr_.normals_pyr, prev_.points_pyr, prev_.normals_pyr);
 
-        ROS_INFO_STREAM("\nMotion Input: " << cameraMotionGuess.matrix << "\nMotion Corrected: " << cameraMotionCorrected.matrix << "\nPose Input: " << currentCameraPose.matrix << "\nPose Corrected: " << cameraPoseCorrected.matrix << "\n");
+      // new camera position = last camera position * ICP motion results
+      cameraPoseCorrected = poses_.back() * icpMotionResults;
+
+      //ROS_INFO_STREAM("\nMotion Input: " << cameraMotionGuess.matrix << "\nPose Input: " << currentCameraPose.matrix << "\nPose Corrected: " << cameraPoseCorrected.matrix << "\n");
     }
-    else {
+    else
+    {
+      // if ICP is not being used, only use the input camera position to update
       cameraPoseCorrected = currentCameraPose;
-      cameraMotionCorrected = cameraMotionGuess;
     }
 
 #endif
@@ -311,50 +327,29 @@ bool kfusion::KinFu::operator()(const Affine3f& inputCameraMotion, const Affine3
 
     }
 
-//#if defined USE_DEPTH
-//        curr_.depth_pyr.swap(prev_.depth_pyr);
-//#else
-//        curr_.points_pyr.swap(prev_.points_pyr);
-//#endif
-//        curr_.normals_pyr.swap(prev_.normals_pyr);
-
-//    poses_.push_back(poses_.back() * cameraMotion);
-    if (params_.update_via_sensor_motion){
-        // Update pose with latest measured pose
-        // TODO: Make this not put the estimated sensor pose in the wrong position relative to the global frame.
-        //cout << "Updating via motion" << endl;
-        poses_.push_back(poses_.back() * cameraMotionCorrected);
-    } else {
-        // Update pose estimate using latest camera motion transform
-        //cout << "Updating via pose" << endl;
-        poses_.push_back(cameraPoseCorrected);
-    }
+    // save the latest camera pose
+    poses_.push_back(cameraPoseCorrected);
 
     ///////////////////////////////////////////////////////////////////////////////////////////
     // Volume integration
 
-    // This is the transform from the origin of the volume to the camera.
-    cout << "Newest pose is  " << poses_.back().matrix << endl;
-
+    // calculate motion between the latest frame and the last integrated frame
     // We do not integrate volume if camera does not move.
-    // TODO: As it turns out I do care about this! Leaving the camera in one place introduces a lot of noise. Come up with a better metric for determining motion.
-    float rnorm = (float) cv::norm(cameraMotionGuess.rvec());
-    float tnorm = (float) cv::norm(cameraMotionGuess.translation());
+    Affine3f integrated_distance = last_integrated_pose.inv() * poses_.back();
+    float rnorm = (float) cv::norm(integrated_distance.rvec());
+    float tnorm = (float) cv::norm(integrated_distance.translation());
 
-    //cout << "Rnorm " << rnorm << "  Tnorm " << tnorm << endl;
     float current_movement = (rnorm + tnorm) / 2.0;
     bool integrate = current_movement >= p.tsdf_min_camera_movement;
     if (integrate)
     {
-      ROS_WARN("ADDED ANOTHER FRAME!");
-
         //ScopeTime time("tsdf");
-
-        volume_->integrate(dists_, poses_.back(), p.intr);
+      last_integrated_pose = poses_.back();
+      volume_->integrate(dists_, poses_.back(), p.intr);
     }
     else
     {
-      ROS_WARN("camera motion (%4.3f) greater than tsdf_min_camera_movement value (%4.3f), not integrating image.", current_movement, p.tsdf_min_camera_movement);
+      ROS_WARN_THROTTLE(2, "camera motion (%4.3f) is less than tsdf_min_camera_movement value (%4.3f), not integrating image.", current_movement, p.tsdf_min_camera_movement);
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////

@@ -3,7 +3,9 @@
 
 #include "yak/kfusion/internal.hpp"
 #include "yak/kfusion/cuda/temp_utils.hpp"
+#if __CUDACC_VER_MAJOR__ >= 9
 #include <cuda_fp16.h>
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /// TsdfVolume

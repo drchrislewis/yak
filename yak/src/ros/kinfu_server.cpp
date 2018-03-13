@@ -27,7 +27,6 @@ namespace kfusion
         ROS_INFO_STREAM("Use pose hints set to " << use_pose_hints_);
         if (use_pose_hints_) {
           tfListener_.waitForTransform(baseFrame_, cameraFrame_, ros::Time::now(), ros::Duration(0.5));
-          //tfListener_.lookupTransform(cameraFrame_, baseFrame_, ros::Time(0), previous_volume_to_sensor_transform_);
           tfListener_.lookupTransform(baseFrame_, cameraFrame_, ros::Time(0), previous_volume_to_sensor_transform_);
         }
 
@@ -70,49 +69,44 @@ namespace kfusion
 
         if (!has_frame)
         {
-            ros::spinOnce();
             return;
         }
 
-        //ensenso_sensor_optical_frame
         // Once we have a new image, find the transform between the poses where the current image and the previous image were captured.
-        Affine3f previousCameraPoseHint = Affine3f::Identity();
 
-        if (use_pose_hints_) {
+        if (use_pose_hints_)
+        {
           tfListener_.waitForTransform(baseFrame_, cameraFrame_, ros::Time::now(), ros::Duration(0.5));
-          //tfListener_.lookupTransform(cameraFrame_, baseFrame_, ros::Time(0), current_volume_to_sensor_transform_);
           tfListener_.lookupTransform(baseFrame_, cameraFrame_, ros::Time(0), current_volume_to_sensor_transform_);
 
+          // calculate camera motion
           tf::Transform past_to_current_sensor = previous_volume_to_sensor_transform_.inverse() * current_volume_to_sensor_transform_;
 
-
-//          lastCameraMotionHint_ = KinFuServer::TransformToAffine(KinFuServer::SwitchToVolumeFrame(past_to_current_sensor));
+          // update transforms (This seems redundant
           currentCameraMotionHint_ = KinFuServer::TransformToAffine(past_to_current_sensor);
-
-//          lastCameraPoseHint_ = KinFuServer::TransformToAffine(KinFuServer::SwitchToVolumeFrame(current_volume_to_sensor_transform_));
           currentCameraPoseHint_ = KinFuServer::TransformToAffine(current_volume_to_sensor_transform_);
 
-          previousCameraPoseHint = KinFuServer::TransformToAffine(previous_volume_to_sensor_transform_);
-
           previous_volume_to_sensor_transform_ = current_volume_to_sensor_transform_;
-
-        } else {
+        }
+        else
+        {
           currentCameraMotionHint_ = Affine3f::Identity();
         }
 
-        bool has_image = KinFu(currentCameraMotionHint_, currentCameraPoseHint_, previousCameraPoseHint, lastDepth_, lastColor_);
+        // currentCameraPoseHint_ is ONLY used if ICP is OFF
+        bool has_image = KinFu(currentCameraMotionHint_, currentCameraPoseHint_, lastDepth_, lastColor_);
 
         if (has_image)
         {
             PublishRaycastImage();
-
         }
 
+        // If we are using TF, then the frames are already being published.
+        // If not, we need to publish them (for visualization only)
         if(!use_pose_hints_)
         {
           PublishTransform();
         }
-        //PublishTransform();
     }
 
     bool KinFuServer::ExecuteBlocking()
@@ -137,10 +131,10 @@ namespace kfusion
         return true;
     }
 
-    bool KinFuServer::KinFu(const Affine3f& cameraMotionHint, const Affine3f& currentCameraPoseHint, const Affine3f& previousCameraPoseHint, const cv::Mat& depth, const cv::Mat& color)
+    bool KinFuServer::KinFu(const Affine3f& cameraMotionHint, const Affine3f& currentCameraPoseHint, const cv::Mat& depth, const cv::Mat& color)
     {
         depthDevice_.upload(depth.data, depth.step, depth.rows, depth.cols);
-        return(* kinfu_)(cameraMotionHint, currentCameraPoseHint, previousCameraPoseHint, depthDevice_);
+        return(* kinfu_)(cameraMotionHint, currentCameraPoseHint, depthDevice_);
     }
 
     bool KinFuServer::ConnectCamera()
@@ -198,11 +192,12 @@ namespace kfusion
         LoadParam(params.use_icp, "use_icp");
         params.use_pose_hints = use_pose_hints_;
         LoadParam(params.update_via_sensor_motion, "update_via_sensor_motion");
-	/*
-        if (params.use_pose_hints) {
+
+        if (params.use_pose_hints)
+        {
 //          tf::Transform initialPose = KinFuServer::SwitchToVolumeFrame(previous_volume_to_sensor_transform_);
           tf::Transform initialPose = previous_volume_to_sensor_transform_;
-          params.volume_pose.translation(Vec3f(initialPose.getOrigin().x(), initialPose.getOrigin().y(), initialPose.getOrigin().z()));
+          params.camera_pose.translation(Vec3f(initialPose.getOrigin().x(), initialPose.getOrigin().y(), initialPose.getOrigin().z()));
 
           float temp_array[9];
           tf::Matrix3x3 temp_matrix = initialPose.getBasis();
@@ -222,7 +217,7 @@ namespace kfusion
           ROS_INFO_STREAM( matrix.at<float>(3) << " " << matrix.at<float>(4) << " " << matrix.at<float>(5) );
           ROS_INFO_STREAM( matrix.at<float>(6) << " " << matrix.at<float>(7) << " " << matrix.at<float>(8) << "\n");
           //matrix.val[0] = 0;
-          params.volume_pose.linear(matrix);
+          params.camera_pose.linear(matrix);
           //params.volume_pose.rotation(matrix);
 
 
@@ -252,7 +247,9 @@ namespace kfusion
           LoadParam(volPosX, "volume_pos_x");
           LoadParam(volPosY, "volume_pos_y");
           LoadParam(volPosZ, "volume_pos_z");
+          ROS_INFO_STREAM("volPos (params): " << volPosX << ", " << volPosY << ", " << volPosZ);
           params.volume_pose.translation(Vec3f(volPosX, volPosY, volPosZ));
+          params.camera_pose = Affine3f::Identity();
         }
 	*/
           float volPosX, volPosY, volPosZ;
@@ -336,7 +333,8 @@ namespace kfusion
       sensor_msgs::PointCloud2 msg;
       pcl::toROSMsg(cloud, msg);
       msg.header.stamp = ros::Time::now();
-      msg.header.frame_id = "/turn_table";
+      //msg.header.frame_id = "/turn_table";
+      msg.header.frame_id = baseFrame_;
 
       ROS_INFO_STREAM("publishing cloud w/ " << cloud.size() << " points.");
       cloud_pub_.publish(msg);

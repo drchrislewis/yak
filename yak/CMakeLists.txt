@@ -67,6 +67,7 @@ if(${CUDA_VERSION_STRING} VERSION_GREATER "4.1")
     endif()
 APPEND_TARGET_ARCH_FLAGS()
 message(STATUS "CUDA_BIN_ARCH ${CUDA_ARCH_BIN}")
+message("CUDA_BIN_ARCH ${CUDA_ARCH_BIN}")
 
 find_package(catkin REQUIRED COMPONENTS
   message_generation

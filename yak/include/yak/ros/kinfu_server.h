@@ -88,7 +88,7 @@ namespace kfusion
             // Publishes the current camera transform.
             bool PublishTransform();
             // Does a single KinFu step given a depth and (optional) color image.
-            bool KinFu(const Affine3f& cameraMotionHint, const Affine3f& currentCameraPoseHint, const Affine3f& previousCameraPoseHint, const cv::Mat& depth, const cv::Mat& color);
+            bool KinFu(const Affine3f& cameraMotionHint, const Affine3f& currentCameraPoseHint, const cv::Mat& depth, const cv::Mat& color);
 
              inline bool ShouldExit() const { return should_exit_; }
              inline void SetExit(bool value) { should_exit_ = value; }
@@ -129,9 +129,6 @@ namespace kfusion
             ros::Publisher raycastImgPublisher_;
             std::string baseFrame_;
             std::string cameraFrame_;
-
-            //std::string pose_hint_base_;
-            //std::string pose_hint_camera_frame_;
             tf::TransformBroadcaster tfBroadcaster_;
             tf::TransformListener tfListener_;
             ros::Publisher cloud_pub_;
