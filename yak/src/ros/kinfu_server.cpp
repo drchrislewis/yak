@@ -235,38 +235,21 @@ namespace kfusion
 //          previous_volume_to_sensor_transform_.getBasis().
 //          pose.rotation();
         }
-        else
-        {
-          float volPosX, volPosY, volPosZ;
-          volPosX = params.volume_pose.translation().val[0];
-          volPosY = params.volume_pose.translation().val[1];
-          volPosZ = params.volume_pose.translation().val[2];
 
-          ROS_INFO_STREAM("volPos (default): " << volPosX << ", " << volPosY << ", " << volPosZ);
+	// initialize volume assuming pose of camera is upper corner unless given parameters
+	float volPosX, volPosY, volPosZ;
+	volPosX = params.volume_pose.translation().val[0];
+	volPosY = params.volume_pose.translation().val[1];
+	volPosZ = params.volume_pose.translation().val[2];
+	LoadParam(volPosX, "volume_pos_x");
+	LoadParam(volPosY, "volume_pos_y");
+	LoadParam(volPosZ, "volume_pos_z");
+	ROS_INFO_STREAM("volPos (params): " << volPosX << ", " << volPosY << ", " << volPosZ);
+	params.volume_pose.translation(Vec3f(volPosX, volPosY, volPosZ));
+	params.camera_pose = Affine3f::Identity();
 
-          LoadParam(volPosX, "volume_pos_x");
-          LoadParam(volPosY, "volume_pos_y");
-          LoadParam(volPosZ, "volume_pos_z");
-          ROS_INFO_STREAM("volPos (params): " << volPosX << ", " << volPosY << ", " << volPosZ);
-          params.volume_pose.translation(Vec3f(volPosX, volPosY, volPosZ));
-          params.camera_pose = Affine3f::Identity();
-        }
-	*/
-          float volPosX, volPosY, volPosZ;
-          volPosX = params.volume_pose.translation().val[0];
-          volPosY = params.volume_pose.translation().val[1];
-          volPosZ = params.volume_pose.translation().val[2];
+	ROS_INFO_STREAM("volPos: " << volPosX << ", " << volPosY << ", " << volPosZ);
 
-          ROS_INFO_STREAM("volPos (default): " << volPosX << ", " << volPosY << ", " << volPosZ);
-
-          LoadParam(volPosX, "volume_pos_x");
-          LoadParam(volPosY, "volume_pos_y");
-          LoadParam(volPosZ, "volume_pos_z");
-          params.volume_pose.translation(Vec3f(volPosX, volPosY, volPosZ));
-
-
-
-        ROS_INFO_STREAM("volPos (loaded): " << params.volume_pose.translation().val[0] << ", " << params.volume_pose.translation().val[1] << ", " << params.volume_pose.translation().val[2]);
 //        ROS_INFO_STREAM("translation: " << cv::Affine3f::Vec3(volPosX, volPosY, volPosZ));
 
 //        params.volume_pose.translate(-params.volume_pose.translation());
