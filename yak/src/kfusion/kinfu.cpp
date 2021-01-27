@@ -237,19 +237,22 @@ bool kfusion::KinFu::operator()(const Affine3f& inputCameraMotion,
                                    prev_.normals_pyr);
       cameraPoseCorrected = previousCameraPose * cameraMotionCorrected;
     }
-    else
+    // else
+    if(!ok || !params_.use_icp) // if not using icp or it fails, use the hints
     {
       cameraPoseCorrected = currentCameraPose;
       cameraMotionCorrected = cameraMotion;
     }
 
 #endif
+    /* now, we only use icp estimated transform if it is successful. Otherwise, use the currentCameraPose, don't rest
     if (!ok)
     {
       resetVolume();
       resetPose();
       return false;
     }
+    */
   }
 
   //    poses_.push_back(poses_.back() * cameraMotion);
